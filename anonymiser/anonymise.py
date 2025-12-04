@@ -117,11 +117,18 @@ def load_docx_as_lines(path: Path) -> List[str]:
     """
     Load a .docx file and return its content as a list of lines.
 
-    This is a placeholder for now. I will later use python-docx to read
-    paragraphs from the document.
+    - Each paragraph in the Word document becomes one entry in the list.
+    - Empty paragraphs are preserved as empty strings to keep basic structure.
     """
-    # TODO: implement using python-docx
-    raise NotImplementedError("load_docx_as_lines is not implemented yet")
+    document = Document(str(path))
+    lines: List[str] = []
+
+    for paragraph in document.paragraphs:
+        # Use the raw text of the paragraph
+        text = paragraph.text or ""
+        lines.append(text)
+
+    return lines
 
 
 def save_lines_to_docx(lines: List[str], output_path: Path) -> None:
