@@ -135,11 +135,18 @@ def save_lines_to_docx(lines: List[str], output_path: Path) -> None:
     """
     Save a list of lines into a new .docx file at output_path.
 
-    This is a placeholder for now. I will later use python-docx to create
-    a new Document and add each line as a paragraph.
+    Each entry in `lines` becomes a paragraph.
+    Empty strings become blank paragraphs.
     """
-    # TODO: implement using python-docx
-    raise NotImplementedError("save_lines_to_docx is not implemented yet")
+    document = Document()
+
+    for line in lines:
+        document.add_paragraph(line)
+
+    # Ensure parent folder exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    document.save(str(output_path))
 
 
 # ---------------------------------------------------------------------------
