@@ -1,0 +1,377 @@
+Title: Recruitment Document Anonymisation Engine – Design Specification
+
+1. Objectives
+
+The purpose of this anonymisation engine is to remove personally identifiable information (PII) from recruitment documents (CVs and Cover Letters) while preserving all information needed for fair, skills-based shortlisting.
+
+Key goals:
+- Remove candidate identity (name and contact details).
+- Preserve skills, experience, education and achievements.
+- Maintain a clear audit trail for each candidate via a Reference ID.
+- Support both CVs and Cover Letters, including cases where multiple documents belong to one candidate “pack” (e.g. CV + CL).
+
+
+2. File and Folder Structure
+
+Working folders (SharePoint Documents > Recruitment):
+
+- 0_Incoming_From_Email  
+  - Contains original attachments saved from the recruitment mailbox.
+  - Original files are never edited or overwritten.
+
+- 1_To_Anonymise  
+  - Contains working copies of files that need anonymisation.
+  - Python processes files from this folder.
+
+- 2_Anonymised  
+  - Contains anonymised output files produced by the engine.
+
+- 3_Tracker  
+  - Contains the Excel tracker:
+    - Recruitment_Reference_Tracker.xlsx
+    - Inside this file, table tblRecruitmentTracker holds metadata:
+      - RefID
+      - OriginalFileName
+      - SenderEmail
+      - Subject
+      - DateReceived
+      - FileType (CV / CL / Other)
+      - Status (Incoming / To Anonymise / Anonymised / Archived)
+      - Notes
+
+- Archive  
+  - Used to store completed candidate packs (originals + anonymised versions) after the recruitment round is finished.
+
+
+3. Reference ID and File Naming
+
+Each candidate application is assigned a unique Reference ID:
+
+- Format: REC-YYYY-NNN
+  - REC = Recruitment
+  - YYYY = year (e.g. 2025)
+  - NNN = zero-padded sequence number (001, 002, 003, …)
+
+All documents belonging to the same candidate pack share the same RefID.
+
+File naming convention for working copies in 1_To_Anonymise:
+
+- CV: REC-YYYY-NNN_CV.docx
+- Cover Letter: REC-YYYY-NNN_CL.docx
+- Other documents (if used): REC-YYYY-NNN_OTHER.docx
+
+File naming convention for anonymised output in 2_Anonymised:
+
+- CV: REC-YYYY-NNN_CV_Anon.docx
+- Cover Letter: REC-YYYY-NNN_CL_Anon.docx
+- Other: REC-YYYY-NNN_OTHER_Anon.docx
+
+
+4. Overall Engine Flow (Per File)
+
+For each .docx file in 1_To_Anonymise:
+
+1. Parse the filename:
+   - Extract RefID (e.g. REC-2025-001).
+   - Extract FileType (CV, CL or Other).
+
+2. Extract document text while preserving paragraph boundaries.
+
+3. Build candidate "name tokens" using:
+   - OriginalFileName (from tracker).
+   - SenderEmail (from tracker).
+   - Optional: display name from email metadata (if available).
+
+4. Apply the appropriate anonymisation pipeline:
+   - CV anonymisation for FileType = CV.
+   - Cover Letter anonymisation for FileType = CL.
+   - (Other can be handled with a simplified rule set or treated as CV/CL).
+
+5. Save the anonymised document into 2_Anonymised with the _Anon suffix.
+
+6. Update the tracker (tblRecruitmentTracker) for that RefID + FileType:
+   - Set Status = "Anonymised".
+   - Optionally log timestamp and any notes.
+
+
+5. Candidate Name Token Extraction
+
+Goal: derive reliable name components from metadata so the engine can find and mask the candidate’s name in the document text.
+
+Inputs:
+- OriginalFileName (e.g. "Jane_Doe_CV.docx").
+- SenderEmail (e.g. "jane.doe@example.com").
+- Optional email display name (e.g. "Jane Doe <jane.doe@example.com>").
+
+Process:
+
+1. Initialisation:
+   - Start with an empty set: name_tokens = {}.
+
+2. From OriginalFileName:
+   - Remove file extension (e.g. ".docx").
+   - Remove generic words such as "cv", "cover", "letter", "resume", "application".
+   - Split remaining text on spaces, underscores, dashes.
+   - Keep only alphabetic tokens (no digits or symbols).
+   - Convert to lowercase.
+   - Add:
+     - Each token individually (e.g. "jane", "doe").
+     - Combined full name where applicable (e.g. "jane doe").
+
+3. From SenderEmail:
+   - Take substring before "@" (e.g. "jane.doe").
+   - Split on ".", "_", "-" to get tokens (e.g. "jane", "doe").
+   - Convert to lowercase and add to name_tokens.
+
+4. From display name (if available):
+   - Extract the display name part (e.g. "Jane Doe").
+   - Split on spaces, remove non-letter characters, convert to lowercase.
+   - Add tokens and the combined full name.
+
+5. Final name token set example:
+   - name_tokens = {"jane", "doe", "jane doe"}
+
+Usage:
+- These tokens are used to find and replace the candidate’s name wherever it appears in the document text (case-insensitive, word-boundary-aware).
+
+
+6. Shared PII Removal Rules (CV and Cover Letter)
+
+The following PII is removed from all documents (CV and CL):
+
+1. Email addresses:
+   - Any pattern matching "something@something".
+   - Replace with: [EMAIL REMOVED].
+
+2. Phone numbers:
+   - UK and general formats (e.g. "07123 456789", "+44 7123 456789", "01234 567890").
+   - Replace with: [PHONE REMOVED].
+
+3. Web links:
+   - Any http:// or https:// URL.
+   - Any "www.something.tld".
+   - Replace with: [LINK REMOVED].
+
+4. Postcodes:
+   - Patterns resembling UK postcodes (e.g. "SW1A 1AA").
+   - Replace with: [POSTCODE REMOVED].
+
+These rules apply across the whole document, regardless of FileType.
+
+
+7. CV Anonymisation Pipeline
+
+Input: CV document text, structured as a list of paragraphs/lines. name_tokens already built.
+
+Steps:
+
+1. Normalisation:
+   - Create a lowercased version of the text for matching.
+   - Keep the original text for output, but apply replacements consistently.
+
+2. Apply shared PII removal:
+   - Emails → [EMAIL REMOVED].
+   - Phone numbers → [PHONE REMOVED].
+   - URLs → [LINK REMOVED].
+   - Postcodes → [POSTCODE REMOVED].
+
+3. Replace candidate name tokens:
+   - For each token in name_tokens:
+     - Find all whole-word, case-insensitive matches.
+     - Replace them with: [CANDIDATE].
+   - This covers both full name ("jane doe") and individual parts ("jane", "doe").
+
+4. Header name removal:
+   - Inspect the first N paragraphs (e.g. first 3–5).
+   - For each of these header paragraphs:
+     - If the paragraph:
+       - Contains no digits, and
+       - Contains 1–3 capitalised words, and
+       - Contains at least one of the name_tokens (when lowercased)
+       → Replace the entire paragraph with: [CANDIDATE NAME REMOVED].
+
+5. Address-like header removal (optional refinement):
+   - Still in the top section:
+     - If a line appears to contain an address (e.g. contains a postcode pattern or words like "Street", "Road", "Avenue", "Close", etc.),
+       → Replace with: [ADDRESS REMOVED].
+
+6. Preserve work history and skill content:
+   - Do not remove or alter paragraphs that:
+     - Do not match any name_token,
+     - Do not contain contact details or obvious address patterns,
+     - Are part of the main CV content (experience, education, skills, etc.).
+
+7. Reassemble the CV:
+   - Combine the anonymised paragraphs back into a structured document.
+   - Save as: REC-YYYY-NNN_CV_Anon.docx in 2_Anonymised.
+
+
+8. Cover Letter Anonymisation Pipeline
+
+The Cover Letter is handled in three logical zones:
+- Header zone (above the greeting).
+- Body zone (between greeting and signature).
+- Signature zone (after the sign-off phrase).
+
+Input: CL document text as list of paragraphs/lines. name_tokens already built.
+
+8.1 Zone Detection
+
+1. Identify the greeting line:
+   - Find the first line matching (case-insensitive):
+     - Starts with or contains "Dear".
+     - Or matches "To whom it may concern".
+   - Record its index as GREETING_INDEX.
+
+2. Identify the signature trigger:
+ - Scan each line of the cover letter (converted to lowercase for matching) for
+any of the following signature phrases, which commonly indicate the start of
+the closing and signature block:
+
+- kind regards
+- best regards
+- regards
+- warm regards
+- warmest regards
+- yours sincerely
+- yours faithfully
+- sincerely
+- respectfully
+- cordially
+- best wishes
+- with best wishes
+- many thanks
+- with thanks
+- thanks
+- all the best
+- cheers
+- yours truly
+
+If a line contains any of the above triggers (case-insensitive and allowing
+for trailing punctuation such as commas), record its index as:
+
+SIGNATURE_INDEX
+
+If no signature trigger is found, the signature zone is considered empty.
+
+Zones:
+- Header zone: lines 0 to GREETING_INDEX - 1.
+- Body zone: lines GREETING_INDEX to SIGNATURE_INDEX - 1 (or to end if no signature).
+- Signature zone: lines SIGNATURE_INDEX to end (if SIGNATURE_INDEX exists).
+
+
+8.2 Header Zone (above the greeting)
+
+Typical content:
+- Candidate’s name.
+- Address.
+- Contact details.
+- Date.
+
+Rules:
+
+1. Remove name-like lines:
+   - If a line contains any name_token (case-insensitive),
+     → Replace it with: [CANDIDATE NAME REMOVED].
+
+2. Remove contact information:
+   - Apply shared PII removal:
+     - Emails, phones, URLs, postcodes.
+
+3. Preserve non-identifying information:
+   - Dates and neutral text can remain, as long as they do not reveal identity.
+
+
+8.3 Greeting Line
+
+Examples:
+- "Dear Hiring Manager,"
+- "Dear Recruitment Team,"
+- "Dear Sir/Madam,"
+- "To whom it may concern,"
+
+Rules:
+
+1. Keep the greeting text intact:
+   - The greeting is important context and is not anonymised.
+
+2. Rare exception:
+   - If the greeting line also contains a name_token (e.g. "Dear Ms Jane Doe,"):
+     - Replace only the name part with [CANDIDATE],
+       keeping the rest ("Dear Ms [CANDIDATE],").
+
+
+8.4 Body Zone (between greeting and signature)
+
+Typical content:
+- Motivation for the role.
+- Summary of experience.
+- Example achievements.
+
+Rules:
+
+1. Remove name tokens:
+   - For each name_token:
+     - Replace whole-word case-insensitive matches with [CANDIDATE].
+
+2. Remove contact information:
+   - Apply shared PII removal:
+     - Emails, phones, URLs, postcodes.
+
+3. Preserve content:
+   - All other text (skills, experience, motivations, examples) must remain intact.
+
+4. Company names:
+   - Company names that appear naturally in context ("I worked at X Ltd") are kept,
+     as they are part of the candidate’s relevant experience.
+
+
+8.5 Signature Zone (after sign-off phrase)
+
+Typical content:
+- Sign-off phrase (e.g. "Kind regards,").
+- Candidate’s full name.
+- Phone number.
+- Email.
+- Employer and address.
+- Optional job title.
+
+Rules:
+
+1. Keep the sign-off line itself (e.g. "Kind regards,")
+
+2. Replace everything after the sign-off with a single marker:
+   - [SIGNATURE BLOCK REMOVED]
+
+This removes:
+- Printed name.
+- Personal email.
+- Personal phone.
+- Address and company details within the signature block.
+
+This approach ensures that all identifiable information in the signature area is removed while preserving the standard closing courtesy.
+
+
+9. Output and Tracker Update
+
+For each processed file:
+
+1. Output document:
+   - Save anonymised document to:
+     - 2_Anonymised/REC-YYYY-NNN_CV_Anon.docx (for CVs)
+     - 2_Anonymised/REC-YYYY-NNN_CL_Anon.docx (for cover letters)
+
+2. Tracker update:
+   - In tblRecruitmentTracker:
+     - Locate row(s) with matching RefID and FileType.
+     - Update Status from "To Anonymise" or "Incoming" to "Anonymised".
+     - Optionally record:
+       - Anonymisation date/time.
+       - Any errors or special notes.
+
+3. Audit trail:
+   - Original files remain in 0_Incoming_From_Email unmodified.
+   - Anonymised files are stored in 2_Anonymised.
+   - The Excel tracker provides the full audit history per candidate via RefID.
+
+End of Specification.
