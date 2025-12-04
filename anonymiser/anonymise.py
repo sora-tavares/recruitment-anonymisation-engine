@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import List, Set, Optional, Tuple
 
 # Dependency: python-docx (pip install python-docx)
-# from docx import Document
+from docx import Document
 
 
 # ---------------------------------------------------------------------------
