@@ -1,0 +1,93 @@
+# Recruitment Tracker Schema (Phase 1)
+
+This tracker provides an auditable log of each recruitment document received and its progress through the anonymisation workflow.
+
+One row represents **one DOCX file** (CV, cover letter, or other supporting document).
+
+---
+
+## Key fields
+
+### RefID (string)
+A reference ID generated at email intake.  
+Used to group multiple files from the same email into a single “candidate pack”.
+
+Example format:
+- `REC-ddMMyyyy-HHmm`
+
+Notes:
+- RefID is not shown to candidates.
+- RefID is used internally only for tracking and file association.
+
+---
+
+### DocSeq (integer)
+A sequence number to distinguish multiple DOCX files under the same RefID.
+
+Examples:
+- RefID `REC-24122025-2000` with two DOCX files → DocSeq 1 and 2.
+
+---
+
+## File metadata
+
+### OriginalFileName (string)
+Original attachment filename as received.
+
+### FileType (string: CV | CL | Other)
+A filename-based classification to help sorting/filtering.
+
+Heuristics include:
+- CV: filename contains `cv` or `resume`
+- CL: filename contains `cover`, `letter`, or common abbreviations like `cl`
+
+Important:
+- This label is informational only and must not gate anonymisation.
+- If unknown, default to `Other`.
+
+### DateReceived (string / datetime)
+Timestamp of intake in UK time.
+
+Recommended format:
+- `dd/MM/yyyy HH:mm`
+
+### SenderEmail (string/email)
+Email address of the sender (from the message metadata).
+
+### Subject (string)
+Email subject line at intake.
+
+---
+
+## Processing fields
+
+### Status (string: Incoming | To Anonymise | Done | Archived)
+Represents the document lifecycle (not mailbox folder location):
+
+- **Incoming**: row created at intake
+- **To Anonymise**: DOCX saved into `Recruitment/1_To_Anonymise`
+- **Done**: anonymised file created in `Recruitment/2_Anonymised`
+- **Archived**: original file moved from `1_To_Anonymise` to an archive location after success
+
+### Notes (string)
+Operational notes to support triage and audit.
+
+Examples:
+- `Email contained 2 attachments.`
+- `Mixed submission rejected (PDF present).`
+- `Auto-classified as CL based on filename.`
+
+Notes should remain non-sensitive and must not include candidate PII beyond what already exists in the SenderEmail field.
+
+---
+
+## Optional future fields (Phase 2+)
+
+These are not required for Phase 1 but are useful once Python is integrated:
+
+- **AnonymisedFileName** (string)
+- **ArchivePath** (string)
+- **ProcessedDateTime** (datetime)
+- **ProcessorVersion** (string) e.g. anonymiser version
+- **ErrorFlag** (boolean)
+- **ErrorMessage** (string)
